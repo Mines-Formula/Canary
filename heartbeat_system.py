@@ -32,7 +32,9 @@ def status():
     for service, data in heartbeats.items():
         age = (now - data["last_seen"]).total_seconds()
 
-        if age < 15:
+        if data["status"] != "ok":
+            state = "DOWN"
+        elif age < 15:
             state = "UP"
         elif age < 30:
             state = "STALE"

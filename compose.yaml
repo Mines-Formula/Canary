@@ -19,6 +19,9 @@ services:
     build: .
     command: ["python", "emitter/emitter.py"]
     restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /:/host:ro
     environment:
       - CANARY_URL=http://54.196.50.201:8000/heartbeat
       - SERVICE_NAME=fsaelinux
