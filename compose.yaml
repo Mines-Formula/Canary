@@ -14,3 +14,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
+
+  emitter:
+    build: .
+    command: ["python", "emitter/emitter.py"]
+    restart: unless-stopped
+    environment:
+      - CANARY_URL=http://54.196.50.201:8000/heartbeat
+      - SERVICE_NAME=fsaelinux
+      - PING_INTERVAL=10
