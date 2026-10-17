@@ -23,11 +23,19 @@ if [[ -z "$profile" ]]; then
     esac
 fi
 
-if [[ "$profile" != "edge" && "$profile" != "server" ]]; then
-    echo "Unknown profile '$profile' (expected edge or server)" >&2
-    exit 1
-fi
+case "$profile" in
+    edge)   service=emitter ;;
+    server) service=heartbeat ;;
+    *)
+        echo "Unknown profile '$profile' (expected edge or server)" >&2
+        exit 1
+        ;;
+esac
 
-echo "==> $host -> profile '$profile'"
-docker compose --profile "$profile" up -d --build
-docker compose --profile "$profile" ps
+echo "==> $host -> profile '$profile' (service: $service)"
+
+# Set the profile via env var and name the service outright: older Compose
+# versions ignore the --profile flag, which selects nothing at all.
+export COMPOSE_PROFILES="$profile"
+docker compose up -d --build "$service"
+docker compose ps
