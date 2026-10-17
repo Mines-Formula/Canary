@@ -1,6 +1,10 @@
 services:
   heartbeat:
     build: .
+    image: fsae-canary:latest
+    profiles: [ "server" ]
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -17,7 +21,9 @@ services:
 
   emitter:
     build: .
-    command: ["python", "emitter/emitter.py"]
+    image: fsae-canary:latest
+    profiles: [ "emitter" ]
+    command: [ "python", "emitter.py" ]
     restart: unless-stopped
     environment:
       - CANARY_URL=http://54.196.50.201:8000/heartbeat
