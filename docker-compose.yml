@@ -1,6 +1,9 @@
 services:
   heartbeat:
     build: .
+    image: fsae-canary:latest
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -13,16 +16,14 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 30s
 
   emitter:
-    build: .
-    command: ["python", "emitter/emitter.py"]
+    image: fsae-canary:latest
+    command: [ "python", "emitter.py" ]
     restart: unless-stopped
     network_mode: host
     volumes:
       - /:/host:ro
-    environment:
-      - CANARY_URL=http://54.196.50.201:8000/heartbeat
-      - SERVICE_NAME=fsaelinux
-      - PING_INTERVAL=10
+    env_file:
+      - .env

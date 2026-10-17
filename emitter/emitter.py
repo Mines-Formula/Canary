@@ -2,10 +2,9 @@ import enum
 import json
 import logging
 import os
-import re
-import shutil
 import time
 from typing import NamedTuple
+import psutil
 import requests
 
 logging.basicConfig(
@@ -16,18 +15,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration via environment variables
-CANARY_URL = os.getenv(
-    "CANARY_URL",
-    "http://ec2-54-196-50-201.compute-1.amazonaws.com:8000/heartbeat",
-)
+CANARY_URL = os.getenv("CANARY_URL")
+API_KEY = os.getenv("API_KEY")
 SERVICE_NAME = os.getenv("SERVICE_NAME", "fsaelinux")
 INTERVAL_SECONDS = int(os.getenv("PING_INTERVAL", "10"))
-
 BASE_URL = "http://fsaelinux.mines.edu"
+
 
 class Status(enum.StrEnum):
     OK = "ok"
     DOWN = "down"
+
 
 class HttpService(NamedTuple):
     name: str
@@ -41,8 +39,9 @@ HTTP_SERVICES = [
     HttpService(name="Wiki", url=f"{BASE_URL}:4000"),
     HttpService(name="ThePipeline", url=f"{BASE_URL}:6767"),
     HttpService(name="Grafana", url=f"{BASE_URL}:3000/healthz"),  # Healthz is the health/status endpoint for grafana
-    HttpService(name="MockService", url="http://localhost:9999"),  # Mock server for testing
 ]
+
+HTTP_HEADERS = {"X-API-Key": API_KEY}
 
 
 def get_disk_usage(
@@ -51,44 +50,31 @@ def get_disk_usage(
     """Return raw (total, used, free) bytes for mounted physical device filesystems."""
     host_prefix = host_prefix.rstrip("/")
 
-    mounts_path = (
-        f"{host_prefix}/proc/1/mounts"
-        if host_prefix and os.path.exists(f"{host_prefix}/proc/1/mounts")
-        else "/proc/self/mounts"
-    )
-
     disks = {}
 
-    def unescape(value: str) -> str:
-        return re.sub(
-            r"\\([0-7]{3})",
-            lambda match: chr(int(match.group(1), 8)),
-            value,
-        )
+    for part in psutil.disk_partitions():
+        # Makes sure we only get the storage of drives we care about
+        if not part.device.startswith("/dev/") or part.device.startswith("/dev/loop"):
+            continue
 
-    with open(mounts_path, encoding="utf-8") as mounts:
-        for line in mounts:
-            fields = line.split()
-            if len(fields) < 2:
+        # Report the host's own paths, not the container's view of them
+        mount = part.mountpoint
+        if host_prefix:
+            if mount != host_prefix and not mount.startswith(f"{host_prefix}/"):
                 continue
+            mount = mount[len(host_prefix):] or "/"
 
-            dev, mount = map(unescape, fields[:2])
+        if mount == "/boot" or mount.startswith("/boot/"):
+            continue
 
-            # Makes sure we only get the storage of drives we care about
-            if not dev.startswith("/dev/") or dev.startswith("/dev/loop"):
-                continue
+        try:
+            usage = psutil.disk_usage(part.mountpoint)
+        except OSError as exc:
+            logger.warning("Cannot read disk usage for %s: %s", part.mountpoint, exc)
+            continue
 
-            if mount == "/boot" or mount.startswith("/boot/"):
-                continue
-
-            target = f"{host_prefix}{mount}"
-
-            try:
-                # Raw bytes (total, used, free)
-                disks[mount] = tuple(shutil.disk_usage(target))
-            except OSError as exc:
-                logger.warning("Cannot read disk usage for %s: %s", target, exc)
-                continue
+        # Raw bytes (total, used, free)
+        disks[mount] = (usage.total, usage.used, usage.free)
 
     return disks
 
@@ -96,7 +82,7 @@ def get_disk_usage(
 def send_heartbeat(
     service: str,
     status: Status = Status.OK,
-    message: str = "",
+    message: dict = {},
 ) -> None:
     payload = {
         "service": service,
@@ -105,7 +91,7 @@ def send_heartbeat(
     }
 
     try:
-        resp = requests.post(CANARY_URL, json=payload, timeout=5)
+        resp = requests.post(CANARY_URL, json=payload, headers=HTTP_HEADERS, timeout=5)
         if resp.ok:
             logger.info("Heartbeat sent (%s: %s - %s)", service, status, message)
         else:
@@ -115,11 +101,19 @@ def send_heartbeat(
 
 
 def check_host() -> None:
-    raw_disks = get_disk_usage()
+    memory = psutil.virtual_memory()
+
+    payload = {
+        "disks": get_disk_usage(),
+        "memory": (memory.total, memory.used, memory.available),
+        "load": psutil.getloadavg(),
+        "boot_time": psutil.boot_time(),
+    }
+
     send_heartbeat(
         service=SERVICE_NAME,
         status=Status.OK,
-        message=json.dumps(raw_disks),
+        message=payload,
     )
 
 
@@ -136,7 +130,13 @@ def check_http_service(name: str, url: str) -> None:
 
 
 def main() -> None:
+    for name, value in ("CANARY_URL", CANARY_URL), ("API_KEY", API_KEY):
+        if not value:
+            logger.critical("%s is required and not set", name)
+            raise SystemExit(1)
+
     logger.info("Starting Emitter, targeting %s every %ds", CANARY_URL, INTERVAL_SECONDS)
+
     try:
         while True:
             # Check host system fsaelinux stats
