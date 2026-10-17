@@ -1,7 +1,19 @@
+import enum
+import json
+import logging
 import os
+import re
 import shutil
 import time
+from typing import NamedTuple
 import requests
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 # Configuration via environment variables
 CANARY_URL = os.getenv(
@@ -11,30 +23,81 @@ CANARY_URL = os.getenv(
 SERVICE_NAME = os.getenv("SERVICE_NAME", "fsaelinux")
 INTERVAL_SECONDS = int(os.getenv("PING_INTERVAL", "10"))
 
+BASE_URL = "http://fsaelinux.mines.edu"
+
+class Status(enum.StrEnum):
+    OK = "ok"
+    DOWN = "down"
+
+class HttpService(NamedTuple):
+    name: str
+    url: str
+
+
 # Services we want to monitor on fsaelinux
 HTTP_SERVICES = [
-    {"name": "MFHome", "url": "http://fsaelinux.mines.edu:80"},
-    {"name": "InfluxDB", "url": "http://fsaelinux.mines.edu:8086"},
-    {"name": "Wiki", "url": "http://fsaelinux.mines.edu:4000"},
-    {"name": "ThePipeline", "url": "http://fsaelinux.mines.edu:6767"},
-    {"name": "Grafana", "url": "http://fsaelinux.mines.edu:3000/healthz"}, # Healthz is the health/status endpoint for grafana
-    {"name": "MockService", "url": "http://localhost:9999"} # Mock server for testing 
+    HttpService(name="MFHome", url=f"{BASE_URL}:80"),
+    HttpService(name="InfluxDB", url=f"{BASE_URL}:8086"),
+    HttpService(name="Wiki", url=f"{BASE_URL}:4000"),
+    HttpService(name="ThePipeline", url=f"{BASE_URL}:6767"),
+    HttpService(name="Grafana", url=f"{BASE_URL}:3000/healthz"),  # Healthz is the health/status endpoint for grafana
+    HttpService(name="MockService", url="http://localhost:9999"),  # Mock server for testing
 ]
 
 
-def get_disk_usage() -> float:
-    """Returns storage usage percentage of fsaelinux (mounts container to /host)"""
-    if os.path.exists("/host"):
-        path = "/host"
-    elif os.name == "nt":
-        path = "C:\\"
-    else:
-        path = "/"
-    total, used, free = shutil.disk_usage(path)
-    return round((used / total) * 100, 1)
+def get_disk_usage(
+    host_prefix: str = "/host" if os.path.exists("/host") else "",
+) -> dict[str, tuple[int, int, int]]:
+    """Return raw (total, used, free) bytes for mounted physical device filesystems."""
+    host_prefix = host_prefix.rstrip("/")
+
+    mounts_path = (
+        f"{host_prefix}/proc/1/mounts"
+        if host_prefix and os.path.exists(f"{host_prefix}/proc/1/mounts")
+        else "/proc/self/mounts"
+    )
+
+    disks = {}
+
+    def unescape(value: str) -> str:
+        return re.sub(
+            r"\\([0-7]{3})",
+            lambda match: chr(int(match.group(1), 8)),
+            value,
+        )
+
+    with open(mounts_path, encoding="utf-8") as mounts:
+        for line in mounts:
+            fields = line.split()
+            if len(fields) < 2:
+                continue
+
+            dev, mount = map(unescape, fields[:2])
+
+            # Makes sure we only get the storage of drives we care about
+            if not dev.startswith("/dev/") or dev.startswith("/dev/loop"):
+                continue
+
+            if mount == "/boot" or mount.startswith("/boot/"):
+                continue
+
+            target = f"{host_prefix}{mount}"
+
+            try:
+                # Raw bytes (total, used, free)
+                disks[mount] = tuple(shutil.disk_usage(target))
+            except OSError as exc:
+                logger.warning("Cannot read disk usage for %s: %s", target, exc)
+                continue
+
+    return disks
 
 
-def send_heartbeat(service: str, status: str = "ok", message: str = "") -> None:
+def send_heartbeat(
+    service: str,
+    status: Status = Status.OK,
+    message: str = "",
+) -> None:
     payload = {
         "service": service,
         "status": status,
@@ -44,19 +107,19 @@ def send_heartbeat(service: str, status: str = "ok", message: str = "") -> None:
     try:
         resp = requests.post(CANARY_URL, json=payload, timeout=5)
         if resp.ok:
-            print(f"[Canary] Heartbeat sent ({service}: {status} - {message})")
+            logger.info("Heartbeat sent (%s: %s - %s)", service, status, message)
         else:
-            print(f"[Canary Error] Server returned {resp.status_code} for {service}: {resp.text}")
+            logger.error("Server returned %d for %s: %s", resp.status_code, service, resp.text)
     except requests.RequestException as e:
-        print(f"[Canary Error] Failed to send heartbeat for {service} to {CANARY_URL}: {e}")
+        logger.error("Failed to send heartbeat for %s to %s: %s", service, CANARY_URL, e)
 
 
 def check_host() -> None:
-    disk_pct = get_disk_usage()
+    raw_disks = get_disk_usage()
     send_heartbeat(
         service=SERVICE_NAME,
-        status="ok",
-        message=f"Disk usage: {disk_pct}%",
+        status=Status.OK,
+        message=json.dumps(raw_disks),
     )
 
 
@@ -65,27 +128,27 @@ def check_http_service(name: str, url: str) -> None:
         resp = requests.get(url, timeout=3)
         # Any response code < 500 means web server is alive
         if resp.status_code < 500:
-            send_heartbeat(service=name, status="ok", message=f"HTTP {resp.status_code}")
+            send_heartbeat(service=name, status=Status.OK, message=f"HTTP {resp.status_code}")
         else:
-            send_heartbeat(service=name, status="down", message=f"HTTP {resp.status_code}")
+            send_heartbeat(service=name, status=Status.DOWN, message=f"HTTP {resp.status_code}")
     except requests.RequestException as e:
-        send_heartbeat(service=name, status="down", message=f"Unreachable: {type(e).__name__}")
+        send_heartbeat(service=name, status=Status.DOWN, message=f"Unreachable: {type(e).__name__}")
 
 
 def main() -> None:
-    print(f"Starting Emitter, targeting {CANARY_URL} every {INTERVAL_SECONDS}s")
+    logger.info("Starting Emitter, targeting %s every %ds", CANARY_URL, INTERVAL_SECONDS)
     try:
         while True:
             # Check host system fsaelinux stats
             check_host()
 
             # Check each HTTP service
-            for svc in HTTP_SERVICES:
-                check_http_service(svc["name"], svc["url"])
+            for service in HTTP_SERVICES:
+                check_http_service(service.name, service.url)
 
             time.sleep(INTERVAL_SECONDS)
     except KeyboardInterrupt:
-        print("\nCanary Emitter stopped.")
+        logger.info("Canary Emitter stopped.")
 
 
 if __name__ == "__main__":
