@@ -11,6 +11,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY heartbeat-server/app.py .
 COPY emitter/emitter.py .
 
+# COPY keeps the build context's file mode, which depends on the umask of
+# whoever checked the repo out. Normalize it so appuser can read the source.
+RUN chmod 0644 app.py emitter.py
+
 RUN useradd --create-home --uid 10001 appuser
 USER appuser
 
