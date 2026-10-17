@@ -122,9 +122,9 @@ def check_http_service(name: str, url: str) -> None:
         resp = requests.get(url, timeout=3)
         # Any response code < 500 means web server is alive
         if resp.status_code < 500:
-            send_heartbeat(service=name, status=Status.OK, message=f"HTTP {resp.status_code}")
+            send_heartbeat(service=name, status=Status.OK, message={"status_code": resp.status_code})
         else:
-            send_heartbeat(service=name, status=Status.DOWN, message=f"HTTP {resp.status_code}")
+            send_heartbeat(service=name, status=Status.DOWN, message={"status_code": resp.status_code})
     except requests.RequestException as e:
         send_heartbeat(service=name, status=Status.DOWN, message=f"Unreachable: {type(e).__name__}")
 
