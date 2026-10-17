@@ -17,7 +17,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 30s
 
   emitter:
     build: .
@@ -25,7 +25,8 @@ services:
     profiles: [ "emitter" ]
     command: [ "python", "emitter.py" ]
     restart: unless-stopped
-    environment:
-      - CANARY_URL=http://54.196.50.201:8000/heartbeat
-      - SERVICE_NAME=fsaelinux
-      - PING_INTERVAL=10
+    network_mode: host
+    volumes:
+      - /:/host:ro
+    env_file:
+      - .env
