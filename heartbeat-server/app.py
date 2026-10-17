@@ -13,10 +13,51 @@ heartbeats = {}
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
+GIB = 1024**3
+
+
 class Heartbeat(BaseModel):
     service: str
     status: str = "ok"
-    message: str | None = None
+    message: dict | None = None
+
+
+def format_specs(message: str | dict | None) -> dict | None:
+    """Turn the emitter's raw host metrics into readable numbers."""
+    if not isinstance(message, dict):
+        return None
+
+    specs = {}
+
+    if disks := message.get("disks"):
+        specs["disks"] = {
+            mount: {
+                "total_gb": round(total / GIB, 1),
+                "used_gb": round(used / GIB, 1),
+                "free_gb": round(free / GIB, 1),
+                "percent_used": round(used / total * 100, 1) if total else 0.0,
+            }
+            for mount, (total, used, free) in disks.items()
+        }
+
+    if memory := message.get("memory"):
+        total, used, available = memory
+        specs["memory"] = {
+            "total_gb": round(total / GIB, 1),
+            "used_gb": round(used / GIB, 1),
+            "available_gb": round(available / GIB, 1),
+            "percent_used": round(used / total * 100, 1) if total else 0.0,
+        }
+
+    if load := message.get("load"):
+        specs["load"] = [round(avg, 2) for avg in load]
+
+    if boot_time := message.get("boot_time"):
+        now = datetime.now(timezone.utc)
+        specs["boot_time"] = datetime.fromtimestamp(boot_time, timezone.utc).isoformat()
+        specs["uptime_hours"] = round((now.timestamp() - boot_time) / 3600, 1)
+
+    return specs or None
 
 
 def verify_api_key(api_key: str | None = Security(api_key_header)) -> None:
@@ -56,11 +97,17 @@ def get_status():
         else:
             state = "DOWN"
 
-        output[service] = {
+        entry = {
             "state": state,
             "seconds_since_heartbeat": age,
             "status": data["status"],
-            "message": data["message"],
         }
+
+        if specs := format_specs(data["message"]):
+            entry["specs"] = specs
+        else:
+            entry["message"] = data["message"]
+
+        output[service] = entry
 
     return output
