@@ -1,0 +1,1 @@
+"""Canary's automatic Slack monitoring service"""
