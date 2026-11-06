@@ -105,11 +105,12 @@ class Monitor:
             detail = "No heartbeat is present, reporting has been lost."
         elif entry.status != "ok":
             reason = json.dumps(entry.message, sort_keys=True) if isinstance(entry.message, dict) else entry.message
-            detail = f"Emitter reported status {entry.status}: {reason or 'No additional detail'}"
+            detail = f"Emitter reported status `{entry.status}`: {reason or 'No additional detail'}"
         else:
             detail = f"Heartbeat reporting is delayed; last received {entry.age:.0f}s ago."
         if affected and name == self.config.host_service:
-            detail += " Affected services with delayed/missing reporting: " + ", ".join(affected)
+            detail += (" Affected services with delayed/missing reporting: "
+                       + ", ".join(f"`{service}`" for service in affected))
         self._activate(
             key, "service", name, "outage", detail, now, tick,
             suppressed=suppressed, eligible=entry is None or entry.state == "DOWN",
@@ -125,7 +126,8 @@ class Monitor:
         missing = self.store.known("mounts") - host.disks.keys()
         if missing or not host.disks:
             detail = "Storage metrics are missing or invalid"
-            detail += " for: " + ", ".join(sorted(missing)) if missing else " for all mounts."
+            detail += (" for: " + ", ".join(f"`{name}`" for name in sorted(missing))
+                       if missing else " for all mounts.")
             self._activate(COVERAGE_KEY, "coverage", "Storage coverage", "warning", detail, now, tick)
         else:
             self._healthy(COVERAGE_KEY, now, "All known mounts are reporting valid metrics.", polls=1)
@@ -133,14 +135,16 @@ class Monitor:
             self._pause(f"disk:{mount}")
         for mount, disk in sorted(host.disks.items()):
             key = f"disk:{mount}"
+            capacity = f"{disk.free_gib:.1f} GiB free of {disk.total_gib:.1f} GiB."
+            if disk.percent < self.config.disk_clear:
+                self._healthy(key, now, f"Usage on `{mount}` is back to {disk.percent:.1f}%. {capacity}")
+                continue
             detail = (
-                f"{disk.percent:.1f}% used; {disk.free_gib:.1f} GiB free of {disk.total_gib:.1f} GiB. "
-                f"Alert threshold: {self.config.disk_threshold:g}%."
+                f"Disk usage on `{mount}` reached {disk.percent:.1f}% "
+                f"(threshold {self.config.disk_threshold:g}%). {capacity}"
             )
             incident = self.store.incident(key)
-            if disk.percent < self.config.disk_clear:
-                self._healthy(key, now, detail)
-            elif disk.percent >= self.config.disk_threshold:
+            if disk.percent >= self.config.disk_threshold:
                 self._activate(key, "disk", mount, "critical", detail, now, tick, delay=0, reminders=False)
             else:
                 self._pause(key)
