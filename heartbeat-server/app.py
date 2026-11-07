@@ -3,6 +3,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from os import getenv
+from zoneinfo import ZoneInfo
 
 API_KEY = getenv("API_KEY")
 assert API_KEY, "API_KEY is required and not set!"
@@ -14,12 +15,13 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 GIB = 1024**3
+DENVER = ZoneInfo("America/Denver")
 
 
 class Heartbeat(BaseModel):
     service: str
     status: str = "ok"
-    message: dict | None = None
+    message: dict | str | None = None
 
 
 def format_specs(message: str | dict | None) -> dict | None:
@@ -54,7 +56,7 @@ def format_specs(message: str | dict | None) -> dict | None:
 
     if boot_time := message.get("boot_time"):
         now = datetime.now(timezone.utc)
-        specs["boot_time"] = datetime.fromtimestamp(boot_time, timezone.utc).isoformat()
+        specs["boot_time"] = datetime.fromtimestamp(boot_time, DENVER).isoformat()
         specs["uptime_hours"] = round((now.timestamp() - boot_time) / 3600, 1)
 
     return specs or None

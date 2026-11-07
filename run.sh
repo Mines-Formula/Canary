@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Start the Canary services for whichever machine we're on.
 #   fsaelinux -> emitter   (profile "edge")
-#   EC2       -> heartbeat (profile "server")
-# Override with: ./run.sh edge | ./run.sh server
+#   EC2       -> heartbeat + canary (profile "server")
+# Override with: ./run.sh edge | ./run.sh emitter | ./run.sh server
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -17,25 +17,29 @@ if [[ -z "$profile" ]]; then
         ip-*|ec2-*)      profile=server ;;
         *)
             echo "Can't tell what host this is: $host" >&2
-            echo "Usage: $0 [edge|server]" >&2
+            echo "Usage: $0 [edge|emitter|server]" >&2
             exit 1
             ;;
     esac
 fi
 
 case "$profile" in
-    edge)   service=emitter ;;
-    server) service=heartbeat ;;
+    edge|emitter) profile=emitter; services=(emitter) ;;
+    server) services=(heartbeat canary) ;;
     *)
-        echo "Unknown profile '$profile' (expected edge or server)" >&2
+        echo "Unknown profile '$profile' (expected edge, emitter or server)" >&2
         exit 1
         ;;
 esac
 
-echo "==> $host -> profile '$profile' (service: $service)"
+echo "==> $host -> profile '$profile' (services: ${services[*]})"
 
 # Set the profile via env var and name the service outright: older Compose
 # versions ignore the --profile flag, which selects nothing at all.
 export COMPOSE_PROFILES="$profile"
-docker compose up -d --build "$service"
-docker compose ps
+compose=(docker compose)
+if [[ -n "${CANARY_ENV_FILE:-}" ]]; then
+    compose+=(--env-file "$CANARY_ENV_FILE")
+fi
+"${compose[@]}" up -d --build "${services[@]}"
+"${compose[@]}" ps

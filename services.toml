@@ -1,0 +1,32 @@
+# Shared by the fsaelinux emitter and EC2 Canary worker.
+# Keep retired entries with enabled = false so old heartbeats stay ignored
+
+[[services]]
+name = "MFHome"
+url = "http://fsaelinux.mines.edu:80"
+enabled = true
+
+[[services]]
+name = "InfluxDB"
+url = "http://fsaelinux.mines.edu:8086"
+enabled = true
+
+[[services]]
+name = "Wiki"
+url = "http://fsaelinux.mines.edu:4000"
+enabled = true
+
+[[services]]
+name = "ThePipeline"
+url = "http://fsaelinux.mines.edu:6767"
+enabled = true
+
+[[services]]
+name = "Grafana"
+url = "http://fsaelinux.mines.edu:3000/healthz"
+enabled = true
+
+[[services]]
+name = "VaultWarden"
+url = "http://fsaelinux.mines.edu:8222"
+enabled = true

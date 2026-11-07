@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Host-specific config
+.env.*
+!.env.*.example
+data/
+*.sqlite3
+*.sqlite3-*
