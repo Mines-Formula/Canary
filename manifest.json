@@ -1,0 +1,15 @@
+{
+  "display_information": {
+    "name": "Canary",
+    "description": "Automatic fsaelinux service and storage alerts"
+  },
+  "oauth_config": {
+    "scopes": {
+      "user": ["chat:write"]
+    }
+  },
+  "settings": {
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

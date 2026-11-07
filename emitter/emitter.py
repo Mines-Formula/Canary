@@ -3,14 +3,27 @@ import json
 import logging
 import os
 import time
+from datetime import datetime
 from typing import NamedTuple
+from zoneinfo import ZoneInfo
 import psutil
 import requests
 
+DENVER = ZoneInfo("America/Denver")
+
+
+class DenverFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        return datetime.fromtimestamp(record.created, DENVER).strftime(
+            datefmt or "%Y-%m-%d %H:%M:%S %Z (%z)"
+        )
+
+
+handler = logging.StreamHandler()
+handler.setFormatter(DenverFormatter("%(asctime)s [%(levelname)s] %(message)s"))
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[handler],
 )
 logger = logging.getLogger(__name__)
 
