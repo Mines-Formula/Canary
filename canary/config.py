@@ -5,6 +5,8 @@ import math
 import os
 from urllib.parse import urlsplit
 
+from .services import DEFAULT_SERVICES_FILE, load_services
+
 
 @dataclass(frozen=True)
 class Config:
@@ -12,15 +14,14 @@ class Config:
     channel_id: str
     status_url: str = "http://heartbeat:8000/status"
     host_service: str = "fsaelinux"
-    expected_services: tuple[str, ...] = (
-        "fsaelinux", "MFHome", "InfluxDB", "Wiki", "ThePipeline", "Grafana",
-    )
+    expected_services: tuple[str, ...] = ()
     database_path: str = "/app/data/canary.sqlite3"
     poll_interval: float = 10
     confirmation_seconds: float = 60
     reminder_seconds: float = 3600
     disk_threshold: float = 90
     disk_clear: float = 85
+    ignored_services: frozenset[str] = frozenset()
 
     def __post_init__(self):
         if not self.slack_token.startswith("xoxp-"):
@@ -32,6 +33,8 @@ class Config:
             raise ValueError("CANARY_STATUS_URL must be an HTTP(S) URL without embedded credentials")
         if not self.host_service.strip() or not self.database_path.strip():
             raise ValueError("CANARY_HOST_SERVICE and CANARY_DB_PATH must not be empty")
+        if self.host_service in self.ignored_services:
+            raise ValueError("The host service cannot be retired")
         for name in ("poll_interval", "confirmation_seconds", "reminder_seconds"):
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:
@@ -58,13 +61,15 @@ class Config:
                 values[name] = float(env.get(variable, default))
             except (TypeError, ValueError):
                 raise ValueError(f"{variable} must be a number") from None
-        services = env.get("CANARY_EXPECTED_SERVICES", ",".join(cls.expected_services))
+        host_service = env.get("CANARY_HOST_SERVICE", cls.host_service).strip()
+        services = load_services(env.get("CANARY_SERVICES_FILE", DEFAULT_SERVICES_FILE), host_name=host_service)
         return cls(
             slack_token=env.get("SLACK_ADMIN_USER_TOKEN", "").strip(),
             channel_id=env.get("SLACK_CHANNEL_ID", "").strip(),
             status_url=env.get("CANARY_STATUS_URL", cls.status_url).strip(),
-            host_service=env.get("CANARY_HOST_SERVICE", cls.host_service).strip(),
-            expected_services=tuple(dict.fromkeys(s.strip() for s in services.split(",") if s.strip())),
+            host_service=host_service,
+            expected_services=tuple(s["name"] for s in services if s["enabled"]),
+            ignored_services=frozenset(s["name"] for s in services if not s["enabled"]),
             database_path=env.get("CANARY_DB_PATH", cls.database_path).strip(),
             **values,
         )

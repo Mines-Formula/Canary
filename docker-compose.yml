@@ -28,11 +28,18 @@ services:
     network_mode: host
     volumes:
       - /:/host:ro
+      - type: bind
+        source: ./services.toml
+        target: /app/services.toml
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
       API_KEY: ${API_KEY:-}
       CANARY_URL: ${CANARY_URL:-}
       SERVICE_NAME: ${SERVICE_NAME:-fsaelinux}
       PING_INTERVAL: ${PING_INTERVAL:-10}
+      CANARY_SERVICES_FILE: /app/services.toml
 
   canary:
     build: .
@@ -46,7 +53,7 @@ services:
       SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
       CANARY_STATUS_URL: ${CANARY_STATUS_URL:-http://heartbeat:8000/status}
       CANARY_HOST_SERVICE: ${CANARY_HOST_SERVICE:-fsaelinux}
-      CANARY_EXPECTED_SERVICES: ${CANARY_EXPECTED_SERVICES:-fsaelinux,MFHome,InfluxDB,Wiki,ThePipeline,Grafana}
+      CANARY_SERVICES_FILE: /app/services.toml
       CANARY_POLL_INTERVAL: ${CANARY_POLL_INTERVAL:-10}
       CANARY_CONFIRMATION_SECONDS: ${CANARY_CONFIRMATION_SECONDS:-60}
       CANARY_REMINDER_SECONDS: ${CANARY_REMINDER_SECONDS:-3600}
@@ -64,6 +71,12 @@ services:
       - ALL
     volumes:
       - canary-data:/app/data
+      - type: bind
+        source: ./services.toml
+        target: /app/services.toml
+        read_only: true
+        bind:
+          create_host_path: false
 
 volumes:
   canary-data:

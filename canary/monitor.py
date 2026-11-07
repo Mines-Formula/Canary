@@ -19,7 +19,9 @@ class Monitor:
         self.candidates = {}
         self.recoveries = {}
         with store.transaction():
-            store.remember("services", (*config.expected_services, config.host_service))
+            store.retire_services(config.ignored_services)
+            services = {*config.expected_services, config.host_service} - config.ignored_services
+            store.remember("services", services)
 
     def _send(self, incident, event, now):
         self.store.enqueue(incident.key, event, notification(self.config, incident, event, now), now)
@@ -76,10 +78,11 @@ class Monitor:
             self._activate(API_INCIDENT_KEY, "monitor", "Status API", "warning", reason, now, tick)
 
     def observe(self, snapshot, now, tick):
+        snapshot = {name: entry for name, entry in snapshot.items() if name not in self.config.ignored_services}
         with self.store.transaction():
             self._healthy(API_INCIDENT_KEY, now, "Status API is returning valid data again.", polls=1)
             self.store.remember("services", snapshot)
-            services = self.store.known("services")
+            services = self.store.known("services") - self.config.ignored_services
             host_name = self.config.host_service
             host = snapshot.get(host_name)
             affected = sorted(

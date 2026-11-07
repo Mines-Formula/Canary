@@ -4,10 +4,11 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import NamedTuple
 from zoneinfo import ZoneInfo
 import psutil
 import requests
+
+from canary.services import DEFAULT_SERVICES_FILE, load_services
 
 DENVER = ZoneInfo("America/Denver")
 
@@ -32,27 +33,12 @@ CANARY_URL = os.getenv("CANARY_URL")
 API_KEY = os.getenv("API_KEY")
 SERVICE_NAME = os.getenv("SERVICE_NAME", "fsaelinux")
 INTERVAL_SECONDS = int(os.getenv("PING_INTERVAL", "10"))
-BASE_URL = "http://fsaelinux.mines.edu"
 
 
 class Status(enum.StrEnum):
     OK = "ok"
     DOWN = "down"
 
-
-class HttpService(NamedTuple):
-    name: str
-    url: str
-
-
-# Services we want to monitor on fsaelinux
-HTTP_SERVICES = [
-    HttpService(name="MFHome", url=f"{BASE_URL}:80"),
-    HttpService(name="InfluxDB", url=f"{BASE_URL}:8086"),
-    HttpService(name="Wiki", url=f"{BASE_URL}:4000"),
-    HttpService(name="ThePipeline", url=f"{BASE_URL}:6767"),
-    HttpService(name="Grafana", url=f"{BASE_URL}:3000/healthz"),  # Healthz is the health/status endpoint for grafana
-]
 
 HTTP_HEADERS = {"X-API-Key": API_KEY}
 
@@ -148,7 +134,15 @@ def main() -> None:
             logger.critical("%s is required and not set", name)
             raise SystemExit(1)
 
-    logger.info("Starting Emitter, targeting %s every %ds", CANARY_URL, INTERVAL_SECONDS)
+    try:
+        services = load_services(os.getenv("CANARY_SERVICES_FILE", DEFAULT_SERVICES_FILE), host_name=SERVICE_NAME)
+    except ValueError as error:
+        logger.critical("Configuration error: %s", error)
+        raise SystemExit(1) from error
+    http_services = [service for service in services if service["enabled"]]
+
+    logger.info("Starting Emitter, targeting %s every %ds (%d HTTP services)",
+                CANARY_URL, INTERVAL_SECONDS, len(http_services))
 
     try:
         while True:
@@ -156,8 +150,8 @@ def main() -> None:
             check_host()
 
             # Check each HTTP service
-            for service in HTTP_SERVICES:
-                check_http_service(service.name, service.url)
+            for service in http_services:
+                check_http_service(service["name"], service["url"])
 
             time.sleep(INTERVAL_SECONDS)
     except KeyboardInterrupt:

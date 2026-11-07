@@ -65,6 +65,17 @@ class Store:
         table = self._known_table(category)
         return {row[0] for row in self.connection.execute(f"SELECT name FROM {table}")}
 
+    def retire_services(self, names):
+        """Remove retired service state; caller owns the transaction. Keep delivered history."""
+        for name in names:
+            key = f"service:{name}"
+            self.connection.execute("DELETE FROM known_services WHERE name = ?", (name,))
+            self.connection.execute("DELETE FROM incidents WHERE key = ?", (key,))
+            self.connection.execute(
+                "DELETE FROM notifications WHERE incident_key = ? AND delivered_at IS NULL",
+                (key,),
+            )
+
     @staticmethod
     def _known_table(category):
         return {"services": "known_services", "mounts": "known_mounts"}[category]
