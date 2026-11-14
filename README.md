@@ -40,6 +40,13 @@ Logs and teardown:
 the age of the last heartbeat: under 15s is `UP`, under 30s is `STALE`, past that
 or any non-ok status is `DOWN`.
 
+`POST /<topic>` is an ntfy-style publish: the request body is posted to the
+Canary Slack channel as `[topic] Title` plus the message. It requires the
+`X-API-Key` header; the `Title` header is optional. The server needs
+`SLACK_CHANNEL_ID` set.
+
+    curl -H "X-API-Key: $API_KEY" -H "Title: Backup" -d "finished in 4m" http://<ec2-host>:8000/backups
+
 ## Monitored
 
 The host itself (disks, memory, load, boot time) plus HTTP checks against
@@ -69,3 +76,6 @@ database:
 
 Canary rebuilds its state from `/status` within a minute. Unsent Slack messages
 are lost and any ongoing outage is announced again as a new alert.
+next round of pings lands. Published messages are different: they go into
+Canary's SQLite queue, so they survive restarts and are retried until Slack
+accepts them.

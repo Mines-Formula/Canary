@@ -5,8 +5,12 @@ services:
     profiles: [ "server" ]
     environment:
       API_KEY: ${API_KEY:-}
+      SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
+      CANARY_DB_PATH: /app/data/canary.sqlite3
     ports:
       - "8000:8000"
+    volumes:
+      - canary-data:/app/data
     restart: unless-stopped
     healthcheck:
       test:
