@@ -1,31 +1,14 @@
 import enum
-import json
 import logging
 import os
 import time
-from datetime import datetime
-from zoneinfo import ZoneInfo
 import psutil
 import requests
 
 from canary.services import DEFAULT_SERVICES_FILE, load_services
+from emitter.common import configure_logging, send_heartbeat as post_heartbeat
 
-DENVER = ZoneInfo("America/Denver")
-
-
-class DenverFormatter(logging.Formatter):
-    def formatTime(self, record, datefmt=None):
-        return datetime.fromtimestamp(record.created, DENVER).strftime(
-            datefmt or "%Y-%m-%d %H:%M:%S %Z (%z)"
-        )
-
-
-handler = logging.StreamHandler()
-handler.setFormatter(DenverFormatter("%(asctime)s [%(levelname)s] %(message)s"))
-logging.basicConfig(
-    level=logging.INFO,
-    handlers=[handler],
-)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 # Configuration via environment variables
@@ -38,9 +21,6 @@ INTERVAL_SECONDS = int(os.getenv("PING_INTERVAL", "10"))
 class Status(enum.StrEnum):
     OK = "ok"
     DOWN = "down"
-
-
-HTTP_HEADERS = {"X-API-Key": API_KEY}
 
 
 def get_disk_usage(
@@ -81,22 +61,9 @@ def get_disk_usage(
 def send_heartbeat(
     service: str,
     status: Status = Status.OK,
-    message: dict = {},
+    message: dict | str | None = None,
 ) -> None:
-    payload = {
-        "service": service,
-        "status": status,
-        "message": message,
-    }
-
-    try:
-        resp = requests.post(CANARY_URL, json=payload, headers=HTTP_HEADERS, timeout=5)
-        if resp.ok:
-            logger.info("Heartbeat sent (%s: %s - %s)", service, status, message)
-        else:
-            logger.error("Server returned %d for %s: %s", resp.status_code, service, resp.text)
-    except requests.RequestException as e:
-        logger.error("Failed to send heartbeat for %s to %s: %s", service, CANARY_URL, e)
+    post_heartbeat(CANARY_URL, API_KEY, service, status, message)
 
 
 def check_host() -> None:

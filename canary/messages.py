@@ -35,9 +35,9 @@ def short_id(key):
 def headline(config, incident):
     """A bare mount or coverage subject doesn't say which host it belongs to."""
     if incident.kind == "disk":
-        return f"disk {incident.subject} on {config.host_service}"
+        return f"disk {incident.subject} on {incident.host or config.host_service}"
     if incident.kind == "coverage":
-        return f"{incident.subject} on {config.host_service}"
+        return f"{incident.subject} on {incident.host or config.host_service}"
     return incident.subject
 
 

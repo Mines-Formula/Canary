@@ -5,7 +5,7 @@ import math
 import os
 from urllib.parse import urlsplit
 
-from .services import DEFAULT_SERVICES_FILE, load_services
+from .services import DEFAULT_SERVICES_FILE, load_catalog
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,7 @@ class Config:
     disk_threshold: float = 90
     disk_clear: float = 85
     ignored_services: frozenset[str] = frozenset()
+    hosts: tuple[dict, ...] = ()
 
     def __post_init__(self):
         if not self.slack_token.startswith("xoxp-"):
@@ -62,14 +63,15 @@ class Config:
             except (TypeError, ValueError):
                 raise ValueError(f"{variable} must be a number") from None
         host_service = env.get("CANARY_HOST_SERVICE", cls.host_service).strip()
-        services = load_services(env.get("CANARY_SERVICES_FILE", DEFAULT_SERVICES_FILE), host_name=host_service)
+        services, hosts = load_catalog(env.get("CANARY_SERVICES_FILE", DEFAULT_SERVICES_FILE), host_name=host_service)
         return cls(
             slack_token=env.get("SLACK_ADMIN_USER_TOKEN", "").strip(),
             channel_id=env.get("SLACK_CHANNEL_ID", "").strip(),
             status_url=env.get("CANARY_STATUS_URL", cls.status_url).strip(),
             host_service=host_service,
-            expected_services=tuple(s["name"] for s in services if s["enabled"]),
-            ignored_services=frozenset(s["name"] for s in services if not s["enabled"]),
+            expected_services=tuple(s["name"] for s in services + hosts if s["enabled"]),
+            ignored_services=frozenset(s["name"] for s in services + hosts if not s["enabled"]),
+            hosts=tuple(hosts),
             database_path=env.get("CANARY_DB_PATH", cls.database_path).strip(),
             **values,
         )

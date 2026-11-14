@@ -2,6 +2,8 @@
 
 Uptime monitoring for fsaelinux.
 
+Additional Windows hosts are registered with `[[hosts]]` in `services.toml`.
+
 ## Layout
 
     emitter/emitter.py          runs on fsaelinux, sends heartbeats
@@ -11,7 +13,9 @@ Uptime monitoring for fsaelinux.
 
 ## Setup
 
-Same `.env` on both machines:
+Use the host-specific `.env.emitter.example` on fsaelinux and `.env.server.example`
+on EC2; the `API_KEY` must match. Keep Slack credentials only on EC2.
+The Linux emitter configuration includes:
 
     CANARY_URL=http://<ec2-host>:8000/heartbeat
     SERVICE_NAME=fsaelinux
@@ -40,7 +44,9 @@ or any non-ok status is `DOWN`.
 
 The host itself (disks, memory, load, boot time) plus HTTP checks against
 MFHome, InfluxDB, Wiki, ThePipeline, and Grafana. Anything under a 500 counts as
-alive. To add one, append to `HTTP_SERVICES` in `emitter/emitter.py`.
+alive. To add one, append an enabled `[[services]]` entry to `services.toml`, deploy
+the file to fsaelinux and EC2, and restart their emitter/Canary containers. Retain
+retired entries with `enabled = false`.
 
 ## Notes
 

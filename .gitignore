@@ -151,6 +151,7 @@ activemq-data/
 
 # Environments
 .env
+emitter.toml
 .envrc
 .venv
 env/
