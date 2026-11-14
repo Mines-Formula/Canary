@@ -61,4 +61,6 @@ mount of `/` at `/host` to see the real disks, not the container's. Both are set
 in the compose file.
 
 Heartbeats are not persisted. Restarting the server empties `/status` until the
-next round of pings lands.
+next round of pings lands. Published messages are different: they go into
+Canary's SQLite queue, so they survive restarts and are retried until Slack
+accepts them.

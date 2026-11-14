@@ -1,7 +1,8 @@
-from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from datetime import datetime, timezone
+from html import escape
 from os import getenv
 import re
 import time
@@ -11,7 +12,11 @@ from canary.messages import FIELD_COUNT_LIMIT, FIELD_LIMIT, HEADER_LIMIT, SECTIO
 from canary.storage import Store
 
 API_KEY = getenv("API_KEY")
+
 assert API_KEY, "API_KEY is required and not set!"
+
+SLACK_CHANNEL_ID = getenv("SLACK_CHANNEL_ID")
+DB_PATH = getenv("CANARY_DB_PATH", "/app/data/canary.sqlite3")
 
 app = FastAPI()
 
