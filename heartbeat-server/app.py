@@ -1,12 +1,20 @@
-from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from datetime import datetime, timezone
+from html import escape
 from os import getenv
+import time
 from zoneinfo import ZoneInfo
 
+from canary.storage import Store
+
 API_KEY = getenv("API_KEY")
+
 assert API_KEY, "API_KEY is required and not set!"
+
+SLACK_CHANNEL_ID = getenv("SLACK_CHANNEL_ID")
+DB_PATH = getenv("CANARY_DB_PATH", "/app/data/canary.sqlite3")
 
 app = FastAPI()
 
@@ -79,6 +87,37 @@ def heartbeat(hb: Heartbeat):
     }
 
     return {"received": True}
+
+
+@app.post("/{topic}", dependencies=[Depends(verify_api_key)])
+async def publish(topic: str, request: Request, title: str | None = Header(None)):
+    """ntfy-style publish: the raw body is queued for Canary's Slack sender."""
+    text = (await request.body()).decode(errors="replace").strip()
+
+    if not text:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty message")
+    
+    if not SLACK_CHANNEL_ID:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "SLACK_CHANNEL_ID is not set")
+    
+    # Escaping keeps publishers from injecting <!channel> pings or links.
+    heading = escape(f"[{topic}] {title}" if title else f"[{topic}]", quote=False)
+    payload = {
+        "channel": SLACK_CHANNEL_ID,
+        "text": f"*{heading}*\n{escape(text[:3000], quote=False)}",
+        "unfurl_links": False,
+        "unfurl_media": False,
+    }
+
+    store = Store(DB_PATH)
+    
+    try:
+        with store.transaction():
+            store.enqueue(f"ntfy:{topic}", "message", payload, time.time())
+    finally:
+        store.close()
+    
+    return {"queued": True}
 
 
 @app.get("/status")
