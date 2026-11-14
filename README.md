@@ -36,6 +36,18 @@ Logs and teardown:
 the age of the last heartbeat: under 15s is `UP`, under 30s is `STALE`, past that
 or any non-ok status is `DOWN`.
 
+`POST /<topic>` is an ntfy-style publish: the request body is posted to the
+Canary Slack channel, laid out like Canary's own alerts. It requires the
+`X-API-Key` header, and the server needs `SLACK_CHANNEL_ID` set. Optional headers:
+
+- `Title`: the bold header line (defaults to the topic).
+- `Tags`: the first tag is shown as the header emoji, as in ntfy (`warning`, `white_check_mark`).
+- `Fields`: comma-separated `Name=value` pairs, shown as a two-column grid (up to 10).
+
+      curl -H "X-API-Key: $API_KEY" -H "Title: Backup OK" -H "Tags: white_check_mark" \
+           -H "Fields: Host=fsaelinux, Duration=4m" -d "Nightly backup finished" \
+           http://<ec2-host>:8000/backups
+
 ## Monitored
 
 The host itself (disks, memory, load, boot time) plus HTTP checks against

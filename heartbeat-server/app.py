@@ -3,7 +3,12 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from os import getenv
+import re
+import time
 from zoneinfo import ZoneInfo
+
+from canary.messages import FIELD_COUNT_LIMIT, FIELD_LIMIT, HEADER_LIMIT, SECTION_LIMIT, rich_ts
+from canary.storage import Store
 
 API_KEY = getenv("API_KEY")
 assert API_KEY, "API_KEY is required and not set!"
@@ -79,6 +84,76 @@ def heartbeat(hb: Heartbeat):
     }
 
     return {"received": True}
+
+
+@app.post("/{topic}", dependencies=[Depends(verify_api_key)])
+async def publish(
+    topic: str,
+    request: Request,
+    title: str | None = Header(None),
+    tags: str | None = Header(None),
+    fields: str | None = Header(None),
+):
+    """ntfy-style publish: the raw body is queued for Canary's Slack sender.
+
+    Laid out like Canary's own alerts (canary/messages.py). Optional headers:
+    Title, Tags (first tag is the header emoji, as in ntfy) and
+    Fields ("Host=fsaelinux, Exit=1") for the two-column grid.
+    """
+    body = (await request.body()).decode(errors="replace").strip()
+
+    if not body:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Empty message")
+    
+    if not SLACK_CHANNEL_ID:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "SLACK_CHANNEL_ID is not set")
+    
+    # Escaping keeps publishers from injecting <!channel> pings or links.
+    heading = escape(f"[{topic}] {title}" if title else f"[{topic}]", quote=False)
+    now = time.time()
+
+    emoji = re.sub(r"[^a-z0-9_+-]", "", (tags or "").split(",")[0].lower())
+    pairs = [pair.split("=", 1) for pair in (fields or "").split(",") if "=" in pair]
+    grid = [
+        {"type": "mrkdwn", "text": f"*{escape(key.strip(), quote=False)}*\n{escape(value.strip(), quote=False)}"[:FIELD_LIMIT]}
+        for key, value in pairs
+        if key.strip() and value.strip()
+    ][:FIELD_COUNT_LIMIT]
+    safe_topic = escape(topic, quote=False).replace("`", "'")
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": f"{f':{emoji}: ' if emoji else ''}{title or topic}"[:HEADER_LIMIT],
+            },
+        },
+        {"type": "section", "text": {"type": "mrkdwn", "text": body[:SECTION_LIMIT]}},
+        *([{"type": "section", "fields": grid}] if grid else []),
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": f":clock3: Received {rich_ts(now)} · topic `{safe_topic}`"}],
+        },
+    ]
+
+    payload = {
+        "channel": SLACK_CHANNEL_ID,
+        "text": f"*{heading}*\n{body}",
+        "blocks": blocks,
+        "unfurl_links": False,
+        "unfurl_media": False,
+    }
+
+    store = Store(DB_PATH)
+
+    try:
+        with store.transaction():
+            store.enqueue(f"ntfy:{topic}", "message", payload, now)
+    finally:
+        store.close()
+    
+    return {"queued": True}
 
 
 @app.get("/status")
