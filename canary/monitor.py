@@ -18,13 +18,21 @@ class Monitor:
         # Resets on restart
         self.candidates = {}
         self.recoveries = {}
+        self.hosts = {config.host_service: None, **{
+            host["name"]: frozenset(host["drives"]) for host in config.hosts if host["enabled"]
+        }}
         with store.transaction():
+            store.migrate_hosts(config.host_service)
+            store.retire_hosts(host["name"] for host in config.hosts if not host["enabled"])
             store.retire_services(config.ignored_services)
-            services = {*config.expected_services, config.host_service} - config.ignored_services
+            for host, drives in self.hosts.items():
+                if drives is not None:
+                    store.select_mounts(host, drives)
+            services = {*config.expected_services, *self.hosts} - config.ignored_services
             store.remember("services", services)
 
     def _send(self, incident, event, now):
-        self.store.enqueue(incident.key, event, notification(self.config, incident, event, now), now)
+        self.store.enqueue(incident.key, event, notification(self.config, incident, event, now), now, host=incident.host)
         logger.info("Incident %s: %s (%s)", event, incident.key, incident.severity)
 
     def _pause(self, key):
@@ -32,7 +40,7 @@ class Monitor:
         self.recoveries.pop(key, None)
 
     def _activate(self, key, kind, subject, severity, detail, now, tick, *,
-                  delay=None, suppressed=False, eligible=True, reminders=True):
+                  delay=None, suppressed=False, eligible=True, reminders=True, host=""):
         self.recoveries.pop(key, None)
         incident = self.store.incident(key)
         if incident is None:
@@ -40,7 +48,7 @@ class Monitor:
             delay = self.config.confirmation_seconds if delay is None else delay
             if not eligible or tick - since < delay:
                 return
-            incident = Incident(key, kind, subject, severity, now, now, False, detail)
+            incident = Incident(key, kind, subject, severity, now, now, False, detail, host)
             self.candidates.pop(key, None)
         incident.severity = severity
         incident.detail = detail
@@ -86,18 +94,21 @@ class Monitor:
             host_name = self.config.host_service
             host = snapshot.get(host_name)
             affected = sorted(
-                name for name in services - {host_name}
+                name for name in services - self.hosts.keys()
                 if name not in snapshot or (snapshot[name].status == "ok" and snapshot[name].state != "UP")
             )
             self._service(host_name, host, now, tick, affected=affected)
             host_lost = self.store.incident(f"service:{host_name}") is not None and (
                 host is None or (host.status == "ok" and host.state != "UP")
             )
-            for name in sorted(services - {host_name}):
+            for name in self.hosts.keys() - {host_name}:
+                self._service(name, snapshot.get(name), now, tick)
+            for name in sorted(services - self.hosts.keys()):
                 entry = snapshot.get(name)
                 suppressed = host_lost and (entry is None or entry.status == "ok")
                 self._service(name, entry, now, tick, suppressed=suppressed)
-            self._storage(host, now, tick)
+            for name in self.hosts:
+                self._storage(name, snapshot.get(name), now, tick)
 
     def _service(self, name, entry, now, tick, *, suppressed=False, affected=()):
         key = f"service:{name}"
@@ -117,27 +128,37 @@ class Monitor:
         self._activate(
             key, "service", name, "outage", detail, now, tick,
             suppressed=suppressed, eligible=entry is None or entry.state == "DOWN",
+            host=name if name in self.hosts else "",
         )
 
-    def _storage(self, host, now, tick):
+    def _disk_key(self, host, mount):
+        if host == self.config.host_service:
+            return f"disk:{mount}"  # Preserve existing incidents and their IDs.
+        return "disk:" + json.dumps([host, mount], separators=(",", ":"))
+
+    def _storage(self, name, host, now, tick):
+        coverage_key = COVERAGE_KEY if name == self.config.host_service else "coverage:" + json.dumps(name)
+        drives = self.hosts[name]
+        known = self.store.mounts(name)
         if host is None or host.state != "UP":
-            for key in set(self.candidates) | set(self.recoveries):
-                if key.startswith("disk:") or key == COVERAGE_KEY:
-                    self._pause(key)
+            for key in {self._disk_key(name, mount) for mount in known} | {coverage_key}:
+                self._pause(key)
             return
-        self.store.remember("mounts", host.disks.keys() | host.invalid_mounts)
-        missing = self.store.known("mounts") - host.disks.keys()
-        if missing or not host.disks:
+        disks = {mount: disk for mount, disk in host.disks.items() if drives is None or mount in drives}
+        if drives is None:
+            self.store.remember_mounts(name, host.disks.keys() | host.invalid_mounts)
+        missing = self.store.mounts(name) - disks.keys()
+        if missing or not disks:
             detail = "Storage metrics are missing or invalid"
             detail += (" for: " + ", ".join(f"`{name}`" for name in sorted(missing))
                        if missing else " for all mounts.")
-            self._activate(COVERAGE_KEY, "coverage", "Storage coverage", "warning", detail, now, tick)
+            self._activate(coverage_key, "coverage", "Storage coverage", "warning", detail, now, tick, host=name)
         else:
-            self._healthy(COVERAGE_KEY, now, "All known mounts are reporting valid metrics.", polls=1)
+            self._healthy(coverage_key, now, "All known mounts are reporting valid metrics.", polls=1)
         for mount in missing:
-            self._pause(f"disk:{mount}")
-        for mount, disk in sorted(host.disks.items()):
-            key = f"disk:{mount}"
+            self._pause(self._disk_key(name, mount))
+        for mount, disk in sorted(disks.items()):
+            key = self._disk_key(name, mount)
             capacity = f"{disk.free_gib:.1f} GiB free of {disk.total_gib:.1f} GiB."
             if disk.percent < self.config.disk_clear:
                 self._healthy(key, now, f"Usage on `{mount}` is back to {disk.percent:.1f}%. {capacity}")
@@ -148,7 +169,7 @@ class Monitor:
             )
             incident = self.store.incident(key)
             if disk.percent >= self.config.disk_threshold:
-                self._activate(key, "disk", mount, "critical", detail, now, tick, delay=0, reminders=False)
+                self._activate(key, "disk", mount, "critical", detail, now, tick, delay=0, reminders=False, host=name)
             else:
                 self._pause(key)
                 if incident is not None:

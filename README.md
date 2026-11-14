@@ -2,6 +2,8 @@
 
 Uptime monitoring for fsaelinux.
 
+Additional Windows hosts are registered with `[[hosts]]` in `services.toml`.
+
 ## Layout
 
     emitter/emitter.py          runs on fsaelinux, sends heartbeats
@@ -11,7 +13,9 @@ Uptime monitoring for fsaelinux.
 
 ## Setup
 
-Same `.env` on both machines:
+Use the host-specific `.env.emitter.example` on fsaelinux and `.env.server.example`
+on EC2; the `API_KEY` must match. Keep Slack credentials only on EC2.
+The Linux emitter configuration includes:
 
     CANARY_URL=http://<ec2-host>:8000/heartbeat
     SERVICE_NAME=fsaelinux
@@ -52,7 +56,9 @@ Canary Slack channel, laid out like Canary's own alerts. It requires the
 
 The host itself (disks, memory, load, boot time) plus HTTP checks against
 MFHome, InfluxDB, Wiki, ThePipeline, and Grafana. Anything under a 500 counts as
-alive. To add one, append to `HTTP_SERVICES` in `emitter/emitter.py`.
+alive. To add one, append an enabled `[[services]]` entry to `services.toml`, deploy
+the file to fsaelinux and EC2, and restart their emitter/Canary containers. Retain
+retired entries with `enabled = false`.
 
 ## Notes
 
@@ -61,6 +67,20 @@ mount of `/` at `/host` to see the real disks, not the container's. Both are set
 in the compose file.
 
 Heartbeats are not persisted. Restarting the server empties `/status` until the
+next round of pings lands.
+
+Canary's own state (open incidents, the pending Slack queue) lives in SQLite on
+the `canary-data` volume. Multi-host support migrates that database on first
+start, and older versions cannot read the result. To roll EC2 back to a version
+from before `[[hosts]]`, check out that version and start it with a fresh
+database:
+
+    ./run.sh --fresh
+
+`--fresh` deletes the volume before starting, and only works on EC2.
+
+Canary rebuilds its state from `/status` within a minute. Unsent Slack messages
+are lost and any ongoing outage is announced again as a new alert.
 next round of pings lands. Published messages are different: they go into
 Canary's SQLite queue, so they survive restarts and are retried until Slack
 accepts them.

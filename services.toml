@@ -1,6 +1,11 @@
 # Shared by the fsaelinux emitter and EC2 Canary worker.
 # Keep retired entries with enabled = false so old heartbeats stay ignored
 
+[[hosts]]
+name = "pdm-windows"
+enabled = true
+drives = ['C:\']
+
 [[services]]
 name = "MFHome"
 url = "http://fsaelinux.mines.edu:80"

@@ -14,12 +14,13 @@ RUN python -c "from importlib.resources import files; from pathlib import Path; 
 
 COPY heartbeat-server/app.py .
 COPY emitter/emitter.py .
+COPY emitter ./emitter
 COPY canary ./canary
 
 # COPY keeps the build context's file mode, which depends on the umask of
 # whoever checked the repo out. Normalize it so appuser can read the source.
 RUN chmod 0644 app.py emitter.py \
-    && chmod -R a+rX canary \
+    && chmod -R a+rX canary emitter \
     && useradd --create-home --uid 10001 appuser \
     && mkdir -p /app/data \
     && chown appuser:appuser /app/data

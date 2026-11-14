@@ -1,0 +1,6 @@
+# Emitter config file, lives on windows/PDM server
+heartbeat_url = "http://ec2-54-196-50-201.compute-1.amazonaws.com:8000/heartbeat"
+api_key = "REPLACE_WITH_EXISTING_SHARED_API_KEY"
+host_name = "pdm-windows"
+interval_seconds = 10
+services_file = 'C:\ProgramData\Canary\app\services.toml'

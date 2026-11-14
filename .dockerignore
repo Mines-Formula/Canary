@@ -1,4 +1,5 @@
 .env
+emitter.toml
 .env.*
 .git
 __pycache__/
