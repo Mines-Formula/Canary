@@ -56,3 +56,16 @@ in the compose file.
 
 Heartbeats are not persisted. Restarting the server empties `/status` until the
 next round of pings lands.
+
+Canary's own state (open incidents, the pending Slack queue) lives in SQLite on
+the `canary-data` volume. Multi-host support migrates that database on first
+start, and older versions cannot read the result. To roll EC2 back to a version
+from before `[[hosts]]`, check out that version and start it with a fresh
+database:
+
+    ./run.sh --fresh
+
+`--fresh` deletes the volume before starting, and only works on EC2.
+
+Canary rebuilds its state from `/status` within a minute. Unsent Slack messages
+are lost and any ongoing outage is announced again as a new alert.

@@ -3,13 +3,18 @@
 #   fsaelinux -> emitter   (profile "edge")
 #   EC2       -> heartbeat + canary (profile "server")
 # Override with: ./run.sh edge | ./run.sh emitter | ./run.sh server
+# Add --fresh on EC2 to delete Canary's database first (see README, Notes).
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 host="$(hostname -f 2>/dev/null || hostname)"
 
-profile="${1:-}"
+profile=""
+fresh=""
+for arg in "$@"; do
+    if [[ "$arg" == "--fresh" ]]; then fresh=1; else profile="$arg"; fi
+done
 
 if [[ -z "$profile" ]]; then
     case "$host" in
@@ -40,6 +45,14 @@ export COMPOSE_PROFILES="$profile"
 compose=(docker compose)
 if [[ -n "${CANARY_ENV_FILE:-}" ]]; then
     compose+=(--env-file "$CANARY_ENV_FILE")
+fi
+if [[ -n "$fresh" ]]; then
+    if [[ "$profile" != server ]]; then
+        echo "--fresh only applies to the server profile" >&2
+        exit 1
+    fi
+    echo "==> --fresh: removing containers and the canary-data volume"
+    "${compose[@]}" down -v
 fi
 "${compose[@]}" up -d --build "${services[@]}"
 "${compose[@]}" ps
